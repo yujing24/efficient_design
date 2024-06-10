@@ -13,7 +13,6 @@ gen_Y <- function(mean_Y, sigma_Y){
 }
 
 
-
 sim_data <- function(Nt, # sample size of treatment group in RCT
                      Nc, # sample size of control group in RCT
                      NE, # sample size of EC data
