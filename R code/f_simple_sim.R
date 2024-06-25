@@ -32,6 +32,12 @@ f_EC_out <- function(seed_EC = 123,
   return(data.frame(X_EC, Y_EC))
 }
 
+# Conditional variance estimation function for EC data
+var_fun <- function(data){
+  res <- 1
+  return(res)
+}
+
 data_EC <- f_EC_out(N_EC = 1000)
 
 # Estimate variance of IF-based estimator using EC data
