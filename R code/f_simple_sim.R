@@ -1,5 +1,7 @@
 rm(list=ls())
 library(nloptr)
+library(ggplot2)
+
 
 # Consider a simple case 
 # The treatment assignment for the RPCT data is completely at random 
@@ -11,13 +13,14 @@ library(nloptr)
 ####### Generate EC data and define variance function for our simple case #######
 {
   # Generate outcome Y based on linear regression
-  f_Y_gen <- function(x,
-                      beta0,
-                      beta1, 
-                      sdY){
-    mu <- beta0 + beta1 * x 
-    return(rnorm(1, mean = mu, sd = sdY))
-  }
+  f_Y_gen_EC <- function(x,
+                          beta0,
+                          beta1, 
+                          sdY
+    ){
+        mu <- beta0 + beta1 * x 
+        return(rnorm(1, mean = mu, sd = sdY))
+      }
   
   # Generate EC data
   f_EC_out <- function(seed_EC = 123,
@@ -26,24 +29,26 @@ library(nloptr)
                        sdX_EC = 1,
                        beta0 = 1,
                        beta1 = 2,
-                       sdY = 1){
+                       sdY = 1
+  ){
     set.seed(seed_EC)
     # generate the pre-treatment covariates
     X_EC <- rnorm(N_EC, mean = muX_EC, sd = sdX_EC)
     
-    Y_EC <- mapply(f_Y_gen,
+    Y_EC <- mapply(f_Y_gen_EC,
                    x = X_EC, 
                    beta0, beta1, sdY)
     return(data.frame(X_EC, Y_EC))
   }
   
-  # Conditional variance estimation function for EC data
+  data_EC <- f_EC_out(seed_EC = 123,
+                      N_EC = 1000)
+  
+  # Conditional variance estimation function for EC data -- need to edit
   var_fun <- function(data){
     res <- 1
     return(res)
   }
-  
-  data_EC <- f_EC_out(N_EC = 1000)
   
   # Estimate variance of IF-based estimator using EC data
   Est_var_simple <- function(
@@ -184,13 +189,153 @@ library(nloptr)
                  beta = 0.2,
                  tau = 0.8)
   print( res2 )
+  res2$solution - 1000
+}
+
+
+
+##############################################################
+####### Check the stability of smallest sample size Nt #######
+{
+  # we will generate multiple EC data
+  #  then calculate the smallest Nt for each EC data
+  #  then make boxplot to see whether the smallest Nt from Nonlinear optimization is stable
+  
+  numb <- 10000 # number of EC data
+  
+  set.seed(123)
+  Seeds <- sample(1:599999999, size = numb, replace = F)
+  N_EC <- 1000
+  
+  
+  pi_A <- 0.8
+  Nt <- rep(NA, numb)
+  for(i in 1:numb){
+    print(i)
+    data_EC <- f_EC_out(seed_EC = Seeds[i],
+                        N_EC = 1000)
+    
+    # Use the nonlinear optim function to find the smallest sample size
+    # need to figure out the estimated nu
+    res2 <- nloptr(x0 = c(1200),
+                   eval_f = eval_f0,
+                   lb = c(1010),
+                   ub = c(Inf),
+                   eval_g_ineq = eval_g1,
+                   opts = list("algorithm"="NLOPT_LN_COBYLA",
+                               "xtol_rel"=1.0e-8),
+                   data_EC = data_EC,
+                   r = 1,
+                   d_X = 1,
+                   pi = pi_A, # pi_A
+                   gamma1 = 1,
+                   alpha = 0.05,
+                   beta = 0.2,
+                   tau = 0.8)
+    Nt[i] <- res2$solution - 1000
+  } 
+  
+  boxplot(Nt)
+  mean(Nt) 
+  range(Nt)
+  
+  # record results using 10000 EC data
+  avg_Nt_res <- data.frame(pi_A = c(0.2, 0.4, 0.5, 0.6, 0.8),
+                           Nt = c(161.1026, 130.1736, 123.9928, 119.8759, 114.7387),
+                           Nt_min = c(142.5099, 111.5638, 105.3772, 101.2550, 96.10806),
+                           Nt_max = c(181.3043, 150.3946, 144.2207, 140.1101, 134.98496) )
+  
   
 }
 
 
-###############################################
-####### Nonlinear optimization function #######
-####### Default RCT Sample Size - Schuler #######
+###############################################################
+####### Simulation to verify the power and Type I error #######
+{
+  # Generate outcome Y based on linear regression
+  f_Y_gen_RCT <- function(x,
+                          a,
+                          beta0,
+                          beta1,
+                          tau,
+                          sdY
+  ){
+    mu <- beta0 + beta1 * x + tau * a 
+    return(rnorm(1, mean = mu, sd = sdY))
+  }
+  
+  # Generate RCT data based on given sample size  
+  f_gen_sim <- function(
+    seed = 123,
+    Nt = nt, # sample size of treatment group in RCT data
+    muX = 1, 
+    sdX = 1, 
+    pi = pi_A # propensity score in RCT 
+  ){
+    # sed random seed for each simulation
+    set.seed(seed)
+    
+    # generate the pre-treatment covariates
+    X <- rnorm(n, mean = muX, sd = sdX)
+    
+    # generate A by using pi
+    A <- sample(c(1,0), size = n, prob = c(pi, 1-pi))
+    
+    # generate Y
+    Y_EC <- mapply(f_Y_gen_RCT,
+                   x = X,
+                   a = A,
+                   beta0,
+                   beta1,
+                   tau,
+                   sdY)
+    
+  }
+  
+  
+  # Estimate function
+  f_est <- function(
+    
+  ){
+    
+  }
+  
+  # Define each simulation scenario
+  pi_A_list <- c(0.2, 0.4, 0.5, 0.6, 0.8)
+  Nt_list <- seq(from = 10, to = 400, by = 10)
+  Nt_num <- length(Nt_list)
+  
+  # for each scenario, we will run M simulations: M EC data & RCT data
+  M <- 1000 
+  
+  
+  index_pi <- 1
+  {
+    pi_A <- pi_A_list[index_pi]
+    for(index_Nt in Nt_num){
+      
+      
+      
+    }
+    
+  }
+}
+
+
+
+
+
+
+
+
+
+#####################################################
+####### The following is for previous method  #######
+
+
+#########################################################
+####### Nonlinear optimization function - example #######
+# Default RCT Sample Size - Schuler 
 # Need to estimate nu for IF based simple case
 {
   ### The following optimization for the traditional RCT ###
@@ -253,31 +398,6 @@ library(nloptr)
   
   
 }
-
-
-
-
-############################################################
-####### Generate RCT data based on given sample size #######
-f_gen_sim <- function(
-    seed = 123,
-    NE = 1000, # sample size of EC data
-    Nt = , # sample size of treatment group in RCT data
-    muX = 1, 
-    sdX = 1, 
-    pi = 0.5 # propensity score in RCT 
-){
-  # sed random seed for each simulation
-  set.seed(seed)
-  
-  # generate the pre-treatment covariates
-  X <- rnorm(n, mean = muX, sd = sdX)
-  
-  # generate A by using pi
-  A <- sample(c(1,0), size = n, prob = c(pi, 1-pi))
-  
-}
-
 
 
 ################################################
