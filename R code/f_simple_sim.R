@@ -45,6 +45,8 @@ library(nloptr)
   
   data_EC <- f_EC_out(N_EC = 1000)
   
+  
+  
   # Estimate variance of IF-based estimator using EC data
   Est_var_simple <- function(
     data_EC, # available EC data
@@ -178,14 +180,95 @@ library(nloptr)
                  data_EC = data_EC,
                  r = 1,
                  d_X = 1,
-                 pi = 0.8, # pi_A
+                 pi = 0.5, # pi_A
                  gamma1 = 1,
                  alpha = 0.05,
                  beta = 0.2,
                  tau = 0.8)
   print( res2 )
   
+  ### Use M = 2000 EC data to calcualte the smallest sample size N_RCT 
+  # Since for difference EC data, the calculated sample size is different
+  # We generate 2000 EC data and calculate the average RCT sample size
+  {
+    # pi_A <- 0.5
+    # set.seed(123)
+    
+    # pi_A <- 0.2
+    # set.seed(234)
+    
+    # pi_A <- 0.4
+    # set.seed(345)
+    
+    # pi_A <- 0.6
+    # set.seed(456)
+    
+    pi_A <- 0.8
+    set.seed(567)
+    
+    M <- 2000
+    Index_all <- sample(1:50000000, M, replace=F)
+    
+    N_RCT_res <- rep(NA, M)
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_EC_out(seed_EC = Index_all[i],
+                          N_EC = 1000)
+      res2 <- nloptr(x0 = c(1200),
+                     eval_f = eval_f0,
+                     lb = c(1010),
+                     ub = c(Inf),
+                     eval_g_ineq = eval_g1,
+                     opts = list("algorithm"="NLOPT_LN_COBYLA",
+                                 "xtol_rel"=1.0e-8),
+                     data_EC = data_EC,
+                     r = 1,
+                     d_X = 1,
+                     pi = pi_A,
+                     gamma1 = 1,
+                     alpha = 0.05,
+                     beta = 0.2,
+                     tau = 0.8)
+      N_RCT_res[i] <- res2$objective
+    }
+    
+    # average N_RCT for M = 1000 EC data
+    mean(N_RCT_res - 1000)
+    
+  }
+  
+  
 }
+
+
+
+
+
+
+############################################################
+####### Generate RCT data based on given sample size #######
+f_gen_sim <- function(
+    seed = 123,
+    NR = n_RCT, # sample size of RCT data
+    Nt = , # sample size of treatment group in RCT data
+    muX = 1, 
+    sdX = 1, 
+    pi = 0.5 # propensity score in RCT 
+){
+  # sed random seed for each simulation
+  set.seed(seed)
+  
+  # generate the pre-treatment covariates
+  X <- rnorm(n_RCT, mean = muX, sd = sdX)
+  
+  # generate A by using pi
+  A <- sample(1, size = n_RCT, prob = c(pi, 1-pi))
+ 
+   
+}
+
+
+
 
 
 ###############################################
@@ -256,30 +339,6 @@ library(nloptr)
 
 
 
-
-############################################################
-####### Generate RCT data based on given sample size #######
-f_gen_sim <- function(
-    seed = 123,
-    NE = 1000, # sample size of EC data
-    Nt = , # sample size of treatment group in RCT data
-    muX = 1, 
-    sdX = 1, 
-    pi = 0.5 # propensity score in RCT 
-){
-  # sed random seed for each simulation
-  set.seed(seed)
-  
-  # generate the pre-treatment covariates
-  X <- rnorm(n, mean = muX, sd = sdX)
-  
-  # generate A by using pi
-  A <- sample(c(1,0), size = n, prob = c(pi, 1-pi))
-  
-}
-
-
-
 ################################################
 ####### Default RCT Sample Size - Guo ##########
 {
@@ -316,5 +375,6 @@ f_gen_sim <- function(
            beta = 0.2)
   
 }
+
 
 
