@@ -773,81 +773,160 @@ library(paletteer)
     
   }
   
+  
   # Step 4:
   {
+    rm(list=ls())
+    library(tidyverse)
     
     # setwd("C:/Users/gaoyuji/OneDrive - Merck Sharp & Dohme LLC/Documents/GitHub/hybrid_design/R code")
-    setwd("/Users/jane.gao/Documents/GitHub/hybrid_design/R code")
-    Res1 <- readRDS("res_05_08.RData")
-    Res2 <- 
+    setwd("/Users/jane.gao/Desktop/Hybrid experimental design/5. simulation")
     
-    Res_plot <-  Res %>% 
-      pivot_longer(
-        cols = "power_IF_var":"power_prosp_tau2", 
-        names_to = "estimator",
-        values_to = "power"
-      )
+    {
+      # Res1 <- readRDS("res_06_00_part1.RData")
+      # Res2 <- readRDS("res_06_00_part2.RData")
+      # Res1 <- bind_rows(Res1)
+      # Res2 <- bind_rows(Res2)
+      # Res1$n <- seq(4, 200, by = 2)
+      # Res2$n <- seq(202, 300, by = 2)
+      # Res <- rbind(Res1, Res2)
+      
+      {
+        # n_list1 <- seq(4, 200, by = 2)
+        # Res1_new <- c()
+        # for(i in 1:99){
+        #   temp <- Res1[[i]]
+        #   n_temp <- n_list1[i]
+        #   if(is.na(temp[3]) == F){
+        #     temp$n <- n_temp
+        #     Res1_new <- rbind(Res1_new, temp)
+        #   }else{
+        #     print(i)
+        #   }
+        # }
+        # 
+        # n_list2 <- seq(202, 300, by = 2)
+        # Res2_new <- c()
+        # for(i in 1:50){
+        #   temp <- Res2[[i]]
+        #   n_temp <- n_list2[i]
+        #   if(is.na(temp[2]) == F){
+        #     temp$n <- n_temp
+        #     Res2_new <- rbind(Res2_new, temp)
+        #   }else{
+        #     print(i)
+        #   }
+        # }
+        # 
+        # Res <- rbind(Res1_new, Res2_new)
+      }
+     
+      # saveRDS(Res, "res_06_00.RData")
+    }
     
-    Res_plot$estimator <- factor(Res_plot$estimator, 
-                                           levels = c("power_IF_var",
-                                                      "power_tau2",
-                                                      "power_prosp_tau2"
-                                           ))
-    levels(Res_plot$estimator) <- c("Estimator 1", "Estimator 2", "Estimator 3")
+    Res <- readRDS("res_08_08.RData")
+     
+    # Power  
+    {
+      Res_plot <-  Res %>% 
+        pivot_longer(
+          cols = "power_IF_var":"power_prosp_tau2", 
+          names_to = "estimator",
+          values_to = "power"
+        )
+      
+      Res_plot$estimator <- factor(Res_plot$estimator, 
+                                   levels = c("power_IF_var",
+                                              "power_tau2",
+                                              "power_prosp_tau2"
+                                   ))
+      levels(Res_plot$estimator) <- c("Estimator 1", "Estimator 2", "Estimator 3")
+      
+      
+      # Power
+      p1 <- ggplot(data = Res_plot, aes(x = n, y = power, colour = estimator)) +
+        geom_line(size = 0.8)+
+        geom_hline(yintercept = 0.8,
+                   linetype="dashed",
+                   color = "#023743FF",
+                   size = 0.8)+
+        geom_vline(xintercept=124,
+                   linetype="dashed",
+                   color = "#035AA6FF",
+                   size = 0.8)+
+        geom_vline(xintercept=107,
+                   linetype="dashed",
+                   color = "#011C40FF",
+                   size = 0.8)+
+        geom_vline(xintercept=146,
+                   linetype="dashed",
+                   color = "#05C7F2FF",
+                   size = 0.8)+
+        theme(legend.position = "none")+
+        labs(x="n", y="Power")+
+        annotate("text",x=250, y=0.7,label="beta = 0.8",size = 5)+
+        labs(title= expression(paste("Power When ", tau, " = 0.8, ", pi, " = 0.8")))
+      p1
+      
+      
+      ggsave(plot = p1, 
+             width = 5.5, 
+             height = 5, 
+             dpi = 500, 
+             filename = "/Users/jane.gao/Desktop/Hybrid experimental design/5. simulation/plots/power_08.png")
+      
+      
+    }
     
     
-    p1 <- ggplot(data = Res_plot, aes(x = n, y = power, colour = estimator)) +
-      geom_line(size = 0.5)+
-      geom_hline(yintercept=0.8,
+    # Type I error
+    {
+      Res_plot <-  Res %>% 
+        pivot_longer(
+          cols = "power_IF_var":"power_prosp_tau2", 
+          names_to = "estimator",
+          values_to = "Type_I_Error"
+        )
+      
+      Res_plot$estimator <- factor(Res_plot$estimator, 
+                                   levels = c("power_IF_var",
+                                              "power_tau2",
+                                              "power_prosp_tau2"
+                                   ))
+      levels(Res_plot$estimator) <- c("Estimator 1", "Estimator 2", "Estimator 3")
+      
+      p2 <- ggplot(data = Res_plot, aes(x = n, y = Type_I_Error, colour = estimator)) +
+      geom_line(size = 0.8)+
+      geom_hline(yintercept = 0.05,
                  linetype="dashed",
                  color = "#023743FF",
-                 size = 0.5)+
-      geom_vline(xintercept=124,
-                 linetype="dashed",
-                 color = "#035AA6FF",
-                 size = 0.5)+
-      geom_vline(xintercept=107,
-                 linetype="dashed",
-                 color = "#011C40FF",
-                 size = 0.5)+
-      geom_vline(xintercept=146,
-                 linetype="dashed",
-                 color = "#05C7F2FF",
-                 size = 0.5)+
-      # geom_hline(yintercept=mean(Abs_bias_tau11_box_PP$absolute_bias, na.rm = T),
+                 size = 0.8)+
+      # geom_vline(xintercept=124,
       #            linetype="dashed",
-      #            color = "red",
-      #            size = 1)+
-      labs(title= expression(paste("Power when ", tau, " = 0.8")))
-    p1
-    
-    
-    
-    p2 <- ggplot(data = Res_plot, aes(x = n, y = power, colour = estimator)) +
-      geom_line(size = 0.5)+
-      geom_hline(yintercept=0.8,
-                 linetype="dashed",
-                 color = "#023743FF",
-                 size = 0.5)+
-      geom_vline(xintercept=124,
-                 linetype="dashed",
-                 color = "#035AA6FF",
-                 size = 0.5)+
-      geom_vline(xintercept=107,
-                 linetype="dashed",
-                 color = "#011C40FF",
-                 size = 0.5)+
-      geom_vline(xintercept=146,
-                 linetype="dashed",
-                 color = "#05C7F2FF",
-                 size = 0.5)+
-      # geom_hline(yintercept=mean(Abs_bias_tau11_box_PP$absolute_bias, na.rm = T),
+      #            color = "#035AA6FF",
+      #            size = 0.8)+
+      # geom_vline(xintercept=107,
       #            linetype="dashed",
-      #            color = "red",
-      #            size = 1)+
-      labs(title= expression(paste("Power when ", tau, " = 0.8")))
+      #            color = "#011C40FF",
+      #            size = 0.8)+
+      # geom_vline(xintercept=146,
+      #            linetype="dashed",
+      #            color = "#05C7F2FF",
+    #            size = 0.8)+
+    labs(x="n", y="Type I Error")+
+    annotate("text",x=250, y=0.08,label="alpha = 0.05",size=5)+
+    labs(title= expression(paste("Type I Error When ", tau, " = 0, ", pi, " = 0.8")))
     p2
     
+    
+    ggsave(plot = p2, 
+           width = 7, 
+           height = 5, 
+           dpi = 500, 
+           filename = "/Users/jane.gao/Desktop/Hybrid experimental design/5. simulation/plots/TypeI_08.png")
+    
+    
+    }
     
   }
 }
