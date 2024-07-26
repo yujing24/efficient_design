@@ -1,6 +1,8 @@
 rm(list=ls())
 library(nloptr)
-
+library(dplyr)
+library(tidyr)
+library(paletteer)
 # Consider a simple case 
 # The treatment assignment for the RPCT data is completely at random 
 # There is no unmeasured confounders
@@ -774,9 +776,10 @@ library(nloptr)
   # Step 4:
   {
     
-    setwd("C:/Users/gaoyuji/OneDrive - Merck Sharp & Dohme LLC/Documents/GitHub/hybrid_design/R code")
-    Res <- readRDS("res_05_08.RData")
-    
+    # setwd("C:/Users/gaoyuji/OneDrive - Merck Sharp & Dohme LLC/Documents/GitHub/hybrid_design/R code")
+    setwd("/Users/jane.gao/Documents/GitHub/hybrid_design/R code")
+    Res1 <- readRDS("res_05_08.RData")
+    Res2 <- 
     
     Res_plot <-  Res %>% 
       pivot_longer(
@@ -790,16 +793,60 @@ library(nloptr)
                                                       "power_tau2",
                                                       "power_prosp_tau2"
                                            ))
+    levels(Res_plot$estimator) <- c("Estimator 1", "Estimator 2", "Estimator 3")
     
-    p1 <- ggplot(data = Res_plot, aes(x = n, y = power, group = estimator)) +
-      geom_line()+
-      # geom_hline(yintercept=mean(Abs_bias_tau11_box_PP$absolute_bias, na.rm = T), 
-      #            linetype="dashed", 
+    
+    p1 <- ggplot(data = Res_plot, aes(x = n, y = power, colour = estimator)) +
+      geom_line(size = 0.5)+
+      geom_hline(yintercept=0.8,
+                 linetype="dashed",
+                 color = "#023743FF",
+                 size = 0.5)+
+      geom_vline(xintercept=124,
+                 linetype="dashed",
+                 color = "#035AA6FF",
+                 size = 0.5)+
+      geom_vline(xintercept=107,
+                 linetype="dashed",
+                 color = "#011C40FF",
+                 size = 0.5)+
+      geom_vline(xintercept=146,
+                 linetype="dashed",
+                 color = "#05C7F2FF",
+                 size = 0.5)+
+      # geom_hline(yintercept=mean(Abs_bias_tau11_box_PP$absolute_bias, na.rm = T),
+      #            linetype="dashed",
       #            color = "red",
       #            size = 1)+
-      labs(title="Absolute Bias for Each Estimator in Always-adherence Strata")
+      labs(title= expression(paste("Power when ", tau, " = 0.8")))
     p1
     
+    
+    
+    p2 <- ggplot(data = Res_plot, aes(x = n, y = power, colour = estimator)) +
+      geom_line(size = 0.5)+
+      geom_hline(yintercept=0.8,
+                 linetype="dashed",
+                 color = "#023743FF",
+                 size = 0.5)+
+      geom_vline(xintercept=124,
+                 linetype="dashed",
+                 color = "#035AA6FF",
+                 size = 0.5)+
+      geom_vline(xintercept=107,
+                 linetype="dashed",
+                 color = "#011C40FF",
+                 size = 0.5)+
+      geom_vline(xintercept=146,
+                 linetype="dashed",
+                 color = "#05C7F2FF",
+                 size = 0.5)+
+      # geom_hline(yintercept=mean(Abs_bias_tau11_box_PP$absolute_bias, na.rm = T),
+      #            linetype="dashed",
+      #            color = "red",
+      #            size = 1)+
+      labs(title= expression(paste("Power when ", tau, " = 0.8")))
+    p2
     
     
   }
