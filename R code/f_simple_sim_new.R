@@ -57,25 +57,27 @@ library(paletteer)
     d_X = 1, # the ratio of f(X|R=1) with f(X|R=0)
     pi = 0.5, # given propensity score
     gamma1 = 1 # the ratio of two kappa
-    # var_fun = var_fun # given function to estimate variance
   ){
     
     # Step 0: given propensity score function - skip, let's use 1/2
     
-    # Step 1: estimate V(Y|X,R=0) using data_EC
-    # var_X_EC <- var_fun(data_EC)
-    var_X_EC <- sd(data_EC$X)^2
+    # Step 1: estimate V(Y|X,R=0) using data_EC and Chenyin's method
+    mu0_model <- lm(Y ~ X, data_EC)
+    var_X_EC <- mean((data_EC$Y - predict(mu0_model, data_EC))^2)
     
     # Step 2: estimate V(Y|X,R=1,A=0)
     var_X_RCT_0 <- r * var_X_EC
     
-    # Step 3: estimate kappa 0 and kappa 1
+    # Step 3: estimate d(X)
+    # In this case, the true value of d(X) is 1, thus we use the true value.
+    
+    # Step 4: estimate kappa 0 and kappa 1
     kappa_0 <- mean(var_X_RCT_0)
     kappa_1 <- gamma1 * kappa_0
     
     # Step 4: estimate V(Y|R=1,A=1), V(Y|R=1, A=0) 
     #  Step 4 relies on the d(X) function 
-    var_EC <- var(data_EC$Y_EC)
+    var_EC <- (sd(data_EC$Y))^2
     var_RCT_0 <- var_EC
     var_RCT_1 <- var_EC
     
@@ -85,17 +87,41 @@ library(paletteer)
     N_EC <- nrow(data_EC)
     N <- N_EC + N_RCT
     r_R <- N_RCT / N_EC
-    term1 <- 1 / N_RCT / pi * mean(var_X_RCT_0)
-    term2 <- 1 / N_RCT * (var_EC -  mean(var_X_RCT_0))
-    term3 <- 1 / N_RCT * mean(r * (1 - pi)/(1 - pi + r / d_X / r_R)^2 * var_X_EC)
-    term4 <- 1 / N_RCT * (var_EC - mean(var_X_RCT_0)) 
-    term5 <- 1 / N_RCT * mean(r^2/r_R/(1 - pi + r / d_X / r_R)^2 * var_X_EC)
+    term1 <- 1 / N_RCT / pi * var_X_RCT_0
+    term2 <- 1 / N_RCT * (var_EC -  var_X_RCT_0)
+    term3 <- 1 / N_RCT * (r * (1 - pi) * var_X_EC) / ((1 - pi) + r / d_X / r_R)^2 
+    term4 <- 1 / N_RCT * (var_EC - var_X_RCT_0) 
+    term5 <- 1 / N_RCT * r^2  * var_X_EC / r_R / ((1 - pi) + r / d_X / r_R)^2
     nu2 <- N * (term1 + term2 + term3 + term4 + term5)
     
     return(nu2) 
   } 
   
-  Est_var_simple(data_EC, N_RCT = 246)
+  Est_var_simple(data_EC, N_RCT = 100)
+  
+  
+  # this power function is matched with the following case 
+  power_f <- function(n,
+                      alpha,
+                      beta,
+                      tau,
+                      nu){
+    # wrong formula
+    # res <- pnorm(-qnorm(1 - alpha/2) + sqrt(n) * tau / sqrt(nu)) +
+    #   pnorm(qnorm(1 - alpha/2) + sqrt(n) * tau / sqrt(nu))
+   
+    res <- pnorm(qnorm(alpha/2) + sqrt(n) * tau / sqrt(nu)) +
+      pnorm(qnorm(alpha/2) - sqrt(n) * tau / sqrt(nu))
+    
+    return(c(res))
+    
+  }
+  
+  power_f(n = 1100,
+          alpha = 0.05,
+          beta = 0.8,
+          tau = 0.8,
+          nu = 117.651)
   
 }
 
@@ -132,20 +158,23 @@ library(paletteer)
                       ){
     # Step 0: given propensity score function - skip, let's use 1/2
     
-    # Step 1: estimate V(Y|X,R=0) using data_EC
-    # var_X_EC <- var_fun(data_EC)
-    var_X_EC <- sd(data_EC$X)^2
+    # Step 1: estimate V(Y|X,R=0) using data_EC and Chenyin's method
+    mu0_model <- lm(Y ~ X, data_EC)
+    var_X_EC <- mean((data_EC$Y - predict(mu0_model, data_EC))^2)
     
     # Step 2: estimate V(Y|X,R=1,A=0)
     var_X_RCT_0 <- r * var_X_EC
     
-    # Step 3: estimate kappa 0 and kappa 1
+    # Step 3: estimate d(X)
+    # In this case, the true value of d(X) is 1, thus we use the true value.
+    
+    # Step 4: estimate kappa 0 and kappa 1
     kappa_0 <- mean(var_X_RCT_0)
     kappa_1 <- gamma1 * kappa_0
     
     # Step 4: estimate V(Y|R=1,A=1), V(Y|R=1, A=0) 
     #  Step 4 relies on the d(X) function 
-    var_EC <- var(data_EC$Y)
+    var_EC <- (sd(data_EC$Y))^2
     var_RCT_0 <- var_EC
     var_RCT_1 <- var_EC
     
@@ -155,17 +184,19 @@ library(paletteer)
     N_EC <- nrow(data_EC)
     N_RCT <- n - N_EC
     r_R <- N_RCT / N_EC
-    term1 <- 1 / N_RCT / pi * mean(var_X_RCT_0)
-    term2 <- 1 / N_RCT * (var_EC -  mean(var_X_RCT_0))
-    term3 <- 1 / N_RCT * mean(r * (1 - pi)/(1 - pi + r / d_X / r_R)^2 * var_X_EC)
-    term4 <- 1 / N_RCT * (var_EC - mean(var_X_RCT_0)) 
-    term5 <- 1 / N_RCT * mean(r^2/r_R/(1 - pi + r / d_X / r_R)^2 * var_X_EC)
+    term1 <- 1 / N_RCT / pi * var_X_RCT_0
+    term2 <- 1 / N_RCT * (var_EC -  var_X_RCT_0)
+    term3 <- 1 / N_RCT * (r * (1 - pi) * var_X_EC) / ((1 - pi) + r / d_X / r_R)^2 
+    term4 <- 1 / N_RCT * (var_EC - var_X_RCT_0) 
+    term5 <- 1 / N_RCT * r^2  * var_X_EC / r_R / ((1 - pi) + r / d_X / r_R)^2
     nu2 <- n * (term1 + term2 + term3 + term4 + term5)
+    
     sqrt_nu2 <- sqrt(nu2)
     
-    res <- 1 - beta -
-      pnorm(qnorm(alpha/2) + sqrt(n) * tau / sqrt_nu2) -
+    res <- beta - pnorm(qnorm(alpha/2) + sqrt(n) * tau / sqrt_nu2) -
       pnorm(qnorm(alpha/2) - sqrt(n) * tau / sqrt_nu2)
+    
+    
     return(res)
   }
 
@@ -174,7 +205,7 @@ library(paletteer)
   # need to figure out the estimated nu
   res2 <- nloptr(x0 = c(1200),
                  eval_f = eval_f0,
-                 lb = c(1010),
+                 lb = c(1002),
                  ub = c(Inf),
                  eval_g_ineq = eval_g1,
                  opts = list("algorithm"="NLOPT_LN_COBYLA",
@@ -185,7 +216,7 @@ library(paletteer)
                  pi = 0.5, # pi_A
                  gamma1 = 1,
                  alpha = 0.05,
-                 beta = 0.2,
+                 beta = 0.8,
                  tau = 0.8)
   print( res2 )
   
@@ -193,8 +224,8 @@ library(paletteer)
   # Since for difference EC data, the calculated sample size is different
   # We generate 2000 EC data and calculate the average RCT sample size
   {
-    # pi_A <- 0.5
-    # set.seed(123)
+    pi_A <- 0.5
+    set.seed(123)
     
     # pi_A <- 0.2
     # set.seed(234)
@@ -205,8 +236,8 @@ library(paletteer)
     # pi_A <- 0.6
     # set.seed(456)
     
-    pi_A <- 0.8
-    set.seed(567)
+    # pi_A <- 0.8
+    # set.seed(567)
     
     M <- 2000
     Index_all <- sample(1:50000000, M, replace=F)
@@ -214,7 +245,7 @@ library(paletteer)
     N_RCT_res <- rep(NA, M)
     for(i in 1:M){
       print(i)
-      data_EC <- f_EC_out(seed_EC = Index_all[i],
+      data_EC <- f_gen_EC(seed_EC = Index_all[i],
                           N_EC = 1000)
       res2 <- nloptr(x0 = c(1200),
                      eval_f = eval_f0,
@@ -229,10 +260,11 @@ library(paletteer)
                      pi = pi_A,
                      gamma1 = 1,
                      alpha = 0.05,
-                     beta = 0.2,
+                     beta = 0.8,
                      tau = 0.8)
       N_RCT_res[i] <- res2$objective
     }
+    
     
     # average N_RCT for M = 1000 EC data
     mean(N_RCT_res - 1000)
