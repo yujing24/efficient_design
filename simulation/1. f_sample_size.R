@@ -6,6 +6,11 @@ library(paletteer)
 # Set tau = 0.4 for power and tau = 0 for type I error
 pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
 
+### Use M = 2000 EC data to calculate the smallest sample size N_RCT 
+# Since for difference EC data, the calculated sample size is different
+# We generate 2000 EC data and calculate the average RCT sample size
+M <- 2000 # replicates times
+
 
 ###############################################
 ####### Functions of generating EC data #######
@@ -78,7 +83,6 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
     
   }
   
-  
   ### sensitivity analysis 2 ###
   f_gen_EC_Y_sensi2 <- function(x1,
                          x2,
@@ -123,10 +127,73 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
     
   }
   
+  ### sensitivity analysis 3.1 - Violation of compatibility  ###
+  f_gen_RCT_confound_Y <- function(x1, x2, u, 
+                                   A,
+                                   tau,
+                                   beta0_R, beta1_R, beta2_R,
+                                   betaU,
+                                   sdY_R){
+    mu <- beta0_R + tau * A + beta1_R * x1 + beta2_R * x2 + betaU * u
+    return(rnorm(1, mean = mu, sd = sdY_R))
+  }
+  
+  f_gen_RCT_confound <- function(seed_RCT = 123,
+                                 N_RCT,
+                                 pi_A = 0.5,
+                                 tau = 0.4,
+                                 muX1_R = 1, sdX1_R = 1, pX2_R = 0.5,
+                                 beta0_R = 1, beta1_R = 0.5, beta2_R = -1,
+                                 betaU = 0.3,
+                                 sdY_R = sqrt(0.8)){
+    set.seed(seed_RCT)
+    X1 <- rnorm(N_RCT, mean = muX1_R, sd = sdX1_R)
+    X2 <- rbinom(N_RCT, size = 1, prob = pX2_R)
+    U  <- rnorm(N_RCT, mean = 0, sd = 1)          # U ~ N(0,1) in the current study, always
+    A  <- rbinom(N_RCT, size = 1, prob = pi_A)
+    Y  <- mapply(f_gen_RCT_confound_Y,
+                 x1 = X1, x2 = X2, u = U, A = A,
+                 MoreArgs = list(tau = tau, beta0_R = beta0_R, beta1_R = beta1_R,
+                                 beta2_R = beta2_R, betaU = betaU, sdY_R = sdY_R))
+    # NOTE: U is returned for oracle/diagnostic use only -- drop it before estimation,
+    # since the analyst does not observe U.
+    # return(data.frame(A = A, X1 = X1, X2 = X2, U = U, Y = Y))
+    return(data.frame(A = A, X1 = X1, X2 = X2, Y = Y))
+  }
+  
+  f_gen_EC_confound_Y <- function(x1, x2, u, 
+                                  beta0_EC, beta1_EC, beta2_EC,
+                                  betaU,
+                                  sdY_EC){
+    mu <- beta0_EC + beta1_EC * x1 + beta2_EC * x2 + betaU * u
+    return(rnorm(1, mean = mu, sd = sdY_EC))
+  }
+  
+  f_gen_EC_confound <- function(seed_EC = 123,
+                                N_EC = 1000,
+                                muX1_EC = 1, sdX1_EC = 1, pX2_EC = 0.5,  
+                                beta0_EC = 1, beta1_EC = 0.5, beta2_EC = -1,
+                                betaU = 0.3,
+                                sdY_EC = 1,
+                                delta_U = 0 # this need to adjust 0, 0.5, 1
+                                ){ 
+    set.seed(seed_EC)
+    X1 <- rnorm(N_EC, mean = muX1_EC, sd = sdX1_EC)
+    X2 <- rbinom(N_EC, size = 1, prob = pX2_EC)
+    U  <- rnorm(N_EC, mean = delta_U, sd = 1)     # U ~ N(delta_U, 1) in the EC population
+    Y  <- mapply(f_gen_EC_confound_Y,
+                 x1 = X1, x2 = X2, u = U,
+                 beta0_EC = beta0_EC, beta1_EC = beta1_EC,
+                 beta2_EC = beta2_EC, betaU = betaU, sdY_EC = sdY_EC)
+    # return(data.frame(A = 0, X1 = X1, X2 = X2, U = U, Y = Y))
+    return(data.frame(A = 0, X1 = X1, X2 = X2, Y = Y))
+  }
+  
+  
 }
 
 ####################################################
-####### 1. Sample Size (Z-test) - true value #######
+####### 1.1 Sample Size (Z-test) - true value #######
 {
   
   ### Functions ###
@@ -207,14 +274,245 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
                                          delta = 0.4)
   std_size_sensi2
   
+  ## Sensitivity analysis 3 - Violation of compatibility
+  std_size_sensi3 <- size_diff_in_means(pi_A = pi_A_list,
+                                          alpha = 0.05,
+                                          beta = 0.2,
+                                          sigma1 = sqrt(1.39),
+                                          sigma2 = sqrt(1.39),
+                                          delta = 0.4)
+  std_size_sensi3
+  
+  
 }
 
-#######################################################################
-####### 2. RCT Sample Size based on AIPW Estimator - true value #######
+#####################################################
+####### 1.2 Sample Size (Z-test) - estimation #######
 {
   
   ### Functions ###
   {
+    
+    # Sample size calculation 
+    size_diff_in_means_est <- function(pi_A, 
+                                       alpha = 0.05,
+                                       beta = 0.2,
+                                       data_EC, # available EC data
+                                       r0_M = 1, 
+                                       r1_M = 1,
+                                       delta = 0.4){
+          # 1: treat
+          # 2: control
+          # n2:n1 = control : treatment
+          
+          var_EC <- (sd(data_EC$Y))^2
+          # Step 2: estimate V(Y|R=1, A=1), V(Y|R=1, A=0) 
+          var_RCT_0 <- var_EC * r0_M
+          var_RCT_1 <- var_EC * r1_M
+          
+          sigma1 <- sqrt(var_RCT_1)
+          sigma2 <- sqrt(var_RCT_0)
+            
+          res <- c()
+          for(i in 1:length(pi_A)){
+            ratio <- pi_A[i] / (1 - pi_A[i]) # n2/n1 = control : treatment
+            zalpha <- qnorm(1 - alpha/2)
+            zbeta <- qnorm(1 - beta)
+            n1 <- (sigma1^2 + ratio * sigma2^2) * (zalpha + zbeta)^2 / delta^2
+            res <- rbind(res, c(pi_A[i], ceiling(n1), n2 = ceiling(n1 / ratio), ceiling(n1) + ceiling(n1 / ratio)))
+          }
+          res <- as.data.frame(res)
+          colnames(res) <- c("pi_A", "N_t", "N_c", "size")
+          return(res)
+        }
+      
+  }
+  
+  ### Use M = 2000 EC data to calculate the smallest sample size N_RCT 
+  # Since for difference EC data, the calculated sample size is different
+  # We generate 2000 EC data and calculate the average RCT sample size
+  M <- 2000 # replicates times
+  
+  ###### Simulation section - sufficient EC (sample size 1000) ######
+  {
+    
+    set.seed(123)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_suff <- matrix(NA, nrow = M, ncol = 5)
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_suff(seed_EC = Index_all[i],
+                               N_EC = 1000)
+      
+      N_RCT_res_non_suff[i, ] <- size_diff_in_means_est(pi_A = pi_A_list, 
+                                                         alpha = 0.05,
+                                                         beta = 0.2,
+                                                         data_EC, # available EC data
+                                                         r0_M = 1, 
+                                                         r1_M = 1,
+                                                         delta = 0.4)[, 4]
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_suff <- data.frame(pi = pi_A_list,
+                                   size = ceiling(apply(N_RCT_res_non_suff, 2, mean)))
+    hd_size_non_suff
+    # hd_size_suff$ratio <- (std_size$size - hd_size_suff$size) / std_size$size
+  }
+  
+  ###### Simulation section - insufficient EC (sample size 60) ######
+  {
+    
+    set.seed(234)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_60 <- matrix(NA, nrow = M, ncol = 5)
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_insuff(seed_EC = Index_all[i],
+                                 N_EC = 60)
+      N_RCT_res_non_60[i, ] <- size_diff_in_means_est(pi_A = pi_A_list, 
+                                                        alpha = 0.05,
+                                                        beta = 0.2,
+                                                        data_EC, # available EC data
+                                                        r0_M = 1, 
+                                                        r1_M = 1,
+                                                        delta = 0.4)[, 4]
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_insuff_60 <- data.frame(pi = pi_A_list,
+                                        size = ceiling(apply(N_RCT_res_non_60, 2, mean)))
+    hd_size_non_insuff_60
+    # hd_size_non_insuff_60$ratio <- (std_size$size - hd_size_non_insuff_60$size) / std_size$size
+    
+  }
+  
+  ###### Simulation section - insufficient EC (sample size 30) ######
+  {
+    
+    set.seed(345)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_30 <- matrix(NA, nrow = M, ncol = 5) 
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_insuff(seed_EC = Index_all[i],
+                                 N_EC = 30)
+      
+      N_RCT_res_non_30[i, ] <- size_diff_in_means_est(pi_A = pi_A_list, 
+                                                      alpha = 0.05,
+                                                      beta = 0.2,
+                                                      data_EC, # available EC data
+                                                      r0_M = 1, 
+                                                      r1_M = 1,
+                                                      delta = 0.4)[, 4]
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_insuff_30 <- data.frame(pi = pi_A_list,
+                                        size = ceiling(apply(N_RCT_res_non_30, 2, mean)))
+    hd_size_non_insuff_30
+    
+    # hd_size_non_insuff_30$ratio <- (std_size$size - hd_size_non_insuff_30$size) / std_size$size
+    
+  }
+  
+  ###### Sensitivity section 1 - sufficient EC (sample size 1000) ######
+  # same as Simulation section - sufficient EC (sample size 1000)
+  ###### Simulation section - sufficient EC (sample size 1000) ######
+  {
+    
+    set.seed(123)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_suff <- matrix(NA, nrow = M, ncol = 5)
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_suff(seed_EC = Index_all[i],
+                               N_EC = 1000)
+      
+      N_RCT_res_non_suff[i, ] <- size_diff_in_means_est(pi_A = pi_A_list, 
+                                                        alpha = 0.05,
+                                                        beta = 0.2,
+                                                        data_EC, # available EC data
+                                                        r0_M = 1, 
+                                                        r1_M = 1,
+                                                        delta = 0.4)[, 4]
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_suff <- data.frame(pi = pi_A_list,
+                                   size = ceiling(apply(N_RCT_res_non_suff, 2, mean)))
+    hd_size_non_suff
+    # hd_size_suff$ratio <- (std_size$size - hd_size_suff$size) / std_size$size
+  }
+  
+  ###### Sensitivity section 2 - sufficient EC (sample size 1000)  ######
+  {
+    
+    set.seed(456)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_sensi2 <- matrix(NA, nrow = M, ncol = 5) 
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_sensi2(seed_EC = Index_all[i],
+                                 N_EC = 1000)
+      
+      N_RCT_res_non_sensi2[i, ] <- size_diff_in_means_est(pi_A = pi_A_list, 
+                                                      alpha = 0.05,
+                                                      beta = 0.2,
+                                                      data_EC, # available EC data
+                                                      r0_M = 1, 
+                                                      r1_M = 1,
+                                                      delta = 0.4)[, 4]
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_sensi2 <- data.frame(pi = pi_A_list,
+                                     size = ceiling(apply(N_RCT_res_non_sensi2, 2, mean)))
+    hd_size_non_sensi2
+    
+    # hd_size_non_sensi2$ratio <- (std_size$size - hd_size_non_sensi2$size) / std_size$size
+    
+  }
+  
+  ###### Sensitivity section 3 - violation of compatibility (sample size 1000)  ######
+  {
+    
+    ### delta_U = 0
+    set.seed(567)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_sensi3 <- matrix(NA, nrow = M, ncol = 5) 
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_confound(seed_EC = Index_all[i],
+                                 N_EC = 1000,
+                                 delta_U = 0)
+      
+      N_RCT_res_non_sensi3[i, ] <- size_diff_in_means_est(pi_A = pi_A_list, 
+                                                          alpha = 0.05,
+                                                          beta = 0.2,
+                                                          data_EC, # available EC data
+                                                          r0_M = 1, 
+                                                          r1_M = 1,
+                                                          delta = 0.4)[, 4]
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_sensi3 <- data.frame(pi = pi_A_list,
+                                     size = ceiling(apply(N_RCT_res_non_sensi3, 2, mean)))
+    hd_size_non_sensi3
+    
+  }
+  
+  
+}
+
+#######################################################################
+####### 2.1 RCT Sample Size based on AIPW Estimator - true value #######
+{
+  
+  ### Functions ###
+  {
+    
     ## Functions for simulation section in the main paper and sensitivity analysis 1
     eval_aipw <- function(n, 
                           alpha, 
@@ -230,7 +528,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
                           gamma = 1 
     ){
       
-      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y|X, R=0, A=0)
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
       
       # Step 2: estimate V(Y|R=1, A=1), V(Y|R=1, A=0) 
       var_RCT_0 <- var_EC * r0_M
@@ -297,7 +595,6 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       
     }
     
-    
     ## Functions for sensitivity analysis 2
     eval_aipw_sensi2 <- function(n, 
                                  alpha, 
@@ -320,7 +617,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
                                  gamma = 1 
     ){
       
-      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y|X, R=0, A=0)
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
       
       # Step 2: estimate V(Y|R=1, A=1), V(Y|R=1, A=0) 
       var_RCT_0 <- var_EC * r0_M
@@ -401,6 +698,91 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
     }
     
     
+    ## Functions for simulation section in the main paper and sensitivity analysis 3.1
+    eval_aipw_sensi3 <- function(n, 
+                                  alpha, 
+                                  beta,
+                                  pi_A, # given propensity score
+                                  tau,
+                                  delta_U = 0,
+                                  var_X_EC = 1.09, 
+                                  var_EC = 1.59,
+                                  r0_M = 1.39/1.59,
+                                  r1_M = 1.39/1.59,
+                                  r = 0.8165, # the ratio of variance in EC and variance in control of RCT
+                                  gamma1 = 1,
+                                  gamma = 1 
+    ){
+      
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
+      
+      # Step 2: estimate V(Y|R=1, A=1), V(Y|R=1, A=0) 
+      var_RCT_0 <- var_EC * r0_M
+      var_RCT_1 <- var_EC * r1_M
+      
+      # Step 3: estimate V(Y|X, R=1, A=0) using r(X)
+      var_X_RCT_0 <- r * var_X_EC  
+      
+      # Step 4: estimate kappa 0 and kappa 1
+      kappa_0 <- mean(var_X_RCT_0)
+      kappa_1 <- gamma1 * kappa_0
+      
+      term1 <-  (var_RCT_1 + ((1 - pi_A) / pi_A) * kappa_1)
+      term2 <-  (var_RCT_0 + (pi_A / (1 - pi_A)) * kappa_0)  
+      term3 <-  -2 * gamma * sqrt((var_RCT_0 - kappa_0) * (var_RCT_1 - kappa_1))
+      
+      nu2 <- (term1 + term2 + term3)
+      
+      sqrt_nu2 <- sqrt(nu2)
+      
+      res <- 1 - beta - pnorm(qnorm(alpha/2) + sqrt(n) * tau / sqrt_nu2) -
+        pnorm(qnorm(alpha/2) - sqrt(n) * tau / sqrt_nu2)
+      
+      return(res)
+      
+    }
+    
+    # Grid search function for sample size of the RCT-only AIPW  
+    size_aipw_sensi3 <- function(start = 1,
+                                    end = 500,
+                                    alpha = 0.05,
+                                    beta = 0.2,
+                                    pi_A = 0.5,
+                                    tau = 0.4,
+                                    delta_U = 0,
+                                    var_X_EC = 1.09, 
+                                    var_EC = 1.59,
+                                    r0_M = 1.39/1.59,
+                                    r1_M = 1.39/1.59,
+                                    r = 0.8165, # the ratio of variance in EC and variance in control of RCT
+                                    gamma1 = 1,
+                                    gamma = 1){
+      
+      size_length <- end - start + 1
+      AIPW_size <- matrix(NA, nrow = size_length, ncol = 2)
+      
+      for(i in start:end){
+        power_diff <- eval_aipw_sensi3(n = i,
+                                        alpha = alpha,
+                                        beta = beta,
+                                        pi_A = pi_A,
+                                        tau = tau,
+                                        delta_U = delta_U,
+                                        var_X_EC = var_X_EC, 
+                                        var_EC = var_EC,
+                                        r0_M = r0_M,
+                                        r1_M = r1_M,
+                                        r = r, 
+                                        gamma1 = gamma1,
+                                        gamma = gamma)
+        AIPW_size[i, ] <- c(i, power_diff)
+        if(power_diff <= 0){break}
+      }
+      return(list(i,
+                  AIPW_size))
+      
+    }
+    
   }
   
   ## Simulation section in the main paper
@@ -458,6 +840,295 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
   }
   aipw_size_sensi2
   
+  
+  ## Sensitivity analysis 3 
+  aipw_size_sensi3 <- data.frame(pi = pi_A_list, 
+                                 size = rep(NA, 5),
+                                 ratio = rep(NA, 5))
+  for(i in 1:5){
+    aipw_size_sensi3[i, 2] <- size_aipw_sensi3(start = 1,
+                                               end = 600,
+                                               alpha = 0.05,
+                                               beta = 0.2,
+                                               pi_A = pi_A_list[i], 
+                                               tau = 0.4)[[1]]
+    
+    aipw_size_sensi3[i, 3] <- round((std_size_sensi3$size[i] - aipw_size_sensi3[i, 2]) / std_size_sensi3$size[i], 4) 
+  }
+  aipw_size_sensi3
+  
+}
+
+########################################################################
+####### 2.2 RCT Sample Size based on AIPW Estimator - estimation #######
+{
+  
+  ### Functions ###
+  {
+    
+    ## Functions for simulation section in the main paper and sensitivity analysis 1
+    eval_aipw_est <- function(N_RCT,
+                              alpha, 
+                              beta,
+                              pi_A, 
+                              tau,
+                              data_EC, # available EC data
+                              r0_M = 1, 
+                              r1_M = 1,
+                              r = 1,
+                              gamma1 = 1, # the ratio of two kappa
+                              gamma = 1 # correlation
+    ){
+      
+      # N_EC <- nrow(data_EC)
+      # n <- N_RCT + N_EC
+      # r_R <- N_RCT / N_EC
+      
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
+      mu0_model <- lm(Y ~ X1 + X2, data_EC)
+      var_X_EC <- mean((data_EC$Y - predict(mu0_model, data_EC))^2)
+      var_EC <- (sd(data_EC$Y))^2
+      
+      # Step 2: estimate V(Y|R=1, A=1), V(Y|R=1, A=0) 
+      var_RCT_0 <- var_EC * r0_M
+      var_RCT_1 <- var_EC * r1_M
+      
+      # Step 3: estimate V(Y|X, R=1, A=0) using r(X)
+      var_X_RCT_0 <- r * var_X_EC
+      
+      # Step 4: estimate kappa 0 and kappa 1
+      kappa_0 <- mean(var_X_RCT_0)
+      kappa_1 <- gamma1 * kappa_0
+      
+      # Step 5 - 7: gamma, variance
+      term1 <-  (var_RCT_1 + ((1 - pi_A) / pi_A) * kappa_1)
+      term2 <-  (var_RCT_0 + (pi_A / (1 - pi_A)) * kappa_0)  
+      term3 <-  - 2 * gamma * sqrt((var_RCT_0 - kappa_0) * (var_RCT_1 - kappa_1))
+      
+      nu2 <- (term1 + term2 + term3)
+      
+      sqrt_nu2 <- sqrt(nu2)
+      
+      res <- 1 - beta - pnorm(qnorm(alpha/2) + sqrt(N_RCT) * tau / sqrt_nu2) -
+        pnorm(qnorm(alpha/2) - sqrt(N_RCT) * tau / sqrt_nu2)
+      
+      return(res)
+    }
+    
+    
+    size_aipw_est <- function(start = 1,
+                              end = 500,
+                              alpha = 0.05,
+                              beta = 0.2,
+                              tau = 0.4,
+                              pi_A = 0.5,
+                              data_EC, # available EC data
+                              r0_M = 1, 
+                              r1_M = 1,
+                              r = 1,
+                              gamma1 = 1, # the ratio of two kappa
+                              gamma = 1 # correlation
+    ){
+      
+      size_length <- end - start + 1
+      AIPW_size <- c()
+      
+      for(i in start:end){
+        
+        power_diff <- eval_aipw_est(N_RCT = i,
+                                    alpha = alpha,
+                                    beta = beta,
+                                    tau = tau,
+                                    pi_A = pi_A,
+                                    data_EC = data_EC,
+                                    r0_M = r0_M,
+                                    r1_M = r1_M, 
+                                    r = r,
+                                    gamma1 = gamma1, 
+                                    gamma = gamma)
+        AIPW_size <- rbind(AIPW_size, c(i, power_diff))
+        if(power_diff <= 0){break}
+        
+      }
+      
+      return(list(i,
+                  AIPW_size))
+      
+    }
+    
+    
+    
+  }
+  
+
+  ###### Simulation section - sufficient EC (sample size 1000) ######
+  {
+    
+    set.seed(123)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_suff <- matrix(NA, nrow = M, ncol = 5)
+    start_list <- c(130, 130, 150, 200, 400)
+    end_list <- c(700, 700, 700, 700, 700)
+    Record <- matrix(NA, nrow = M, ncol = 5)
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_suff(seed_EC = Index_all[i],
+                               N_EC = 1000)
+      for(j in 1:5){
+        N_RCT_res_non_suff[i, j] <- size_aipw_est(start = start_list[j],
+                                                  end = end_list[j],
+                                                  alpha = 0.05,
+                                                  beta = 0.2,
+                                                  tau = 0.4,
+                                                  pi_A = pi_A_list[j],
+                                                  data_EC = data_EC)[[1]]
+      }
+      
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_suff <- data.frame(pi = pi_A_list,
+                                   size = ceiling(apply(N_RCT_res_non_suff, 2, mean)))
+    hd_size_non_suff
+    # hd_size_suff$ratio <- (std_size$size - hd_size_suff$size) / std_size$size
+  }
+  
+  ###### Simulation section - insufficient EC (sample size 60) ######
+  {
+    
+    set.seed(234)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_60 <- matrix(NA, nrow = M, ncol = 5)
+    start_list <- c(130, 130, 150, 200, 400)
+    end_list <- c(700, 700, 700, 700, 700)
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_insuff(seed_EC = Index_all[i],
+                                 N_EC = 60)
+      for(j in 1:5){
+        N_RCT_res_non_60[i, j] <- size_aipw_est(start = start_list[j],
+                                                end = end_list[j],
+                                                alpha = 0.05,
+                                                beta = 0.2,
+                                                tau = 0.4,
+                                                pi_A = pi_A_list[j],
+                                                data_EC = data_EC)[[1]]
+      }
+      
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_insuff_60 <- data.frame(pi = pi_A_list,
+                                        size = ceiling(apply(N_RCT_res_non_60, 2, mean)))
+    hd_size_non_insuff_60
+    
+    # hd_size_non_insuff_60$ratio <- (std_size$size - hd_size_non_insuff_60$size) / std_size$size
+    
+  }
+  
+  ###### Simulation section - insufficient EC (sample size 30) ######
+  {
+    
+    set.seed(345)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_30 <- matrix(NA, nrow = M, ncol = 5) 
+    start_list <- c(130, 130, 150, 200, 400)
+    end_list <- c(700, 700, 700, 700, 700)
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_insuff(seed_EC = Index_all[i],
+                                 N_EC = 30)
+      for(j in 1:5){
+        N_RCT_res_non_30[i, j] <- size_aipw_est(start = start_list[j],
+                                                end = end_list[j],
+                                                alpha = 0.05,
+                                                beta = 0.2,
+                                                tau = 0.4,
+                                                pi_A = pi_A_list[j],
+                                                data_EC = data_EC)[[1]]
+      }
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_insuff_30 <- data.frame(pi = pi_A_list,
+                                        size = ceiling(apply(N_RCT_res_non_30, 2, mean)))
+    hd_size_non_insuff_30
+    
+    # hd_size_non_insuff_30$ratio <- (std_size$size - hd_size_non_insuff_30$size) / std_size$size
+    
+  }
+  
+  ###### Sensitivity section 1 - sufficient EC (sample size 1000) ######
+  # same as Simulation section - sufficient EC (sample size 1000)
+  hd_size_non_suff
+  
+  ###### Sensitivity section 2 - sufficient EC (sample size 1000)  ######
+  {
+    
+    set.seed(456)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_sensi2 <- matrix(NA, nrow = M, ncol = 5) 
+    start_list <- c(130, 130, 150, 200, 400)
+    end_list <- c(700, 700, 700, 700, 700)
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_sensi2(seed_EC = Index_all[i],
+                                 N_EC = 1000)
+      for(j in 1:5){
+        N_RCT_res_non_sensi2[i,j] <- size_aipw_est(start = start_list[j],
+                                                   end = end_list[j],
+                                                   alpha = 0.05,
+                                                   beta = 0.2,
+                                                   tau = 0.4,
+                                                   pi_A = pi_A_list[j],
+                                                   data_EC = data_EC)[[1]]
+      }
+      
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_sensi2 <- data.frame(pi = pi_A_list,
+                                     size = ceiling(apply(N_RCT_res_non_sensi2, 2, mean)))
+    hd_size_non_sensi2
+    
+    # hd_size_non_sensi2$ratio <- (std_size$size - hd_size_non_sensi2$size) / std_size$size
+    
+  }
+  
+  ###### Sensitivity section 3 - violation of compatibility (sample size 1000)  ######
+  {
+    
+    ## delta_U = 0
+    set.seed(456)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_sensi3.1 <- matrix(NA, nrow = M, ncol = 5) 
+    start_list <- c(150, 150, 170, 250, 400)
+    end_list <- c(700, 700, 700, 700, 900)
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_confound(seed_EC = Index_all[i],
+                                   N_EC = 1000,
+                                   delta_U = 0 # this need to adjust
+                                   )
+      for(j in 1:5){
+        N_RCT_res_non_sensi3.1[i,j] <- size_aipw_est(start = start_list[j],
+                                                   end = end_list[j],
+                                                   alpha = 0.05,
+                                                   beta = 0.2,
+                                                   tau = 0.4,
+                                                   pi_A = pi_A_list[j],
+                                                   data_EC = data_EC)[[1]]
+      }
+      
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_sensi3.1 <- data.frame(pi = pi_A_list,
+                                     size = ceiling(apply(N_RCT_res_non_sensi3.1, 2, mean)))
+    hd_size_non_sensi3.1
+    
+  }
+  
 }
 
 #########################################################################
@@ -493,7 +1164,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       n <- N_RCT + N_EC
       r_R <- N_RCT / N_EC
       
-      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y|X, R=0, A=0)
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
       
       # Step 2: estimate V(Y|R=1, A=1), V(Y|R=1, A=0) 
       var_RCT_0 <- var_EC * r0_M
@@ -648,7 +1319,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       n <- N_RCT + N_EC
       r_R <- N_RCT / N_EC
       
-      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y|X, R=0, A=0)
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
       
       # Step 2: estimate V(Y|R=1, A=1), V(Y|R=1, A=0) 
       var_RCT_0 <- var_EC * r0_M
@@ -743,6 +1414,167 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
                   Hybrid_size))
       
     }
+    
+    
+    
+    ## Functions for sensitivity analysis 3
+    eval_hybrid_sensi3 <- function(N_RCT, 
+                                 alpha, 
+                                 beta,
+                                 pi_A, 
+                                 tau,
+                                 delta_U = 0,     # no-op, see note in eval_hybrid_confound()
+                                 N_EC = 1000, # 1000 for sufficient case and 60 for insufficient case
+                                 var_X_EC = 1.09, 
+                                 var_EC = 1.59, # sufficient  = 1.5, insufficient = 1.585
+                                 r0_M = 1.39/1.59, # V(Y|R=1, A=0) / V(Y|R=0), 1.3/1.5 for sufficient and 1.3/1.585 for insufficient
+                                 r1_M = 1.39/1.59, # V(Y|R=1, A=1) / V(Y|R=0), 1.3/1.5 for sufficient and 1.3/1.585 for insufficient
+                                 r = 0.8165, # the ratio of variance in EC and variance in control of RCT
+                                 d_X = 1, # the ratio of f(X|R=1) with f(X|R=0), 1 for sufficient, NULL for insufficient
+                                 dist_para = list(mu_R = 1,
+                                                  sigma_R = 1,
+                                                  p_R = 0.5,
+                                                  mu_E = 1.2,
+                                                  sigma_E = sqrt(1.5),
+                                                  p_E = 0.7), # if var_X_EC or r is function, then we must have dist_para
+                                 sample_size = 5*10^5,
+                                 gamma1 = 1, # the ratio of two kappa
+                                 gamma = 1 # correlation
+    ){
+      
+      n <- N_RCT + N_EC
+      r_R <- N_RCT / N_EC
+      
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
+      
+      # Step 2: estimate V(Y|R=1, A=1), V(Y|R=1, A=0) 
+      var_RCT_0 <- var_EC * r0_M
+      var_RCT_1 <- var_EC * r1_M
+      
+      # Step 3: estimate V(Y|X, R=1, A=0) using r(X)
+      var_X_RCT_0 <- r * var_X_EC  
+      
+      # Step 4: estimate kappa 0 and kappa 1
+      kappa_0 <- mean(var_X_RCT_0)
+      kappa_1 <- gamma1 * kappa_0
+      
+      # Step 5 - 7: d(X), gamma, variance
+      if(length(d_X) < 1){
+        
+        pmf_bern <- function(x2, p){
+          return(x2 * p + (1 - x2) * (1 - p))
+        }
+        
+        d_X_true <- function(x1, x2, 
+                             mu_R, sigma_R,
+                             p_R,
+                             mu_E, sigma_E,
+                             p_E
+        ){
+          
+          res <- dnorm(x1, mean = mu_R, sd = sigma_R) * pmf_bern(x2, p_R) / dnorm(x1, mean = mu_E, sd = sigma_E) / pmf_bern(x2, p_E) 
+          return(res)
+          
+        }
+        
+        dX_x1_R <- rnorm(sample_size, mean = dist_para$mu_R, sd = dist_para$sigma_R)
+        dX_x2_R <- rbinom(sample_size, size = 1, prob = dist_para$p_R)
+        d_X_R <-  d_X_true(x1 = dX_x1_R,
+                           x2 = dX_x2_R, 
+                           dist_para$mu_R, dist_para$sigma_R, dist_para$p_R,
+                           dist_para$mu_E, dist_para$sigma_E, dist_para$p_E)
+        
+        dX_x1_E <- rnorm(sample_size, mean = dist_para$mu_E, sd = dist_para$sigma_E)
+        dX_x2_E <- rbinom(sample_size, size = 1, prob = dist_para$p_E)
+        d_X_E <-  d_X_true(x1 = dX_x1_E,
+                           x2 = dX_x2_E, 
+                           dist_para$mu_R, dist_para$sigma_R, dist_para$p_R,
+                           dist_para$mu_E, dist_para$sigma_E, dist_para$p_E)
+        
+        # step 
+        term1 <- kappa_1 / pi_A
+        term2 <- mean(((1 - pi_A) * var_X_RCT_0) / ((1 - pi_A) + r / d_X_R / r_R)^2)
+        term3 <- (var_RCT_1 - kappa_1) + (var_RCT_0 - kappa_0) -
+          2 * gamma * sqrt( (var_RCT_1 - kappa_1) * (var_RCT_0 - kappa_0))
+        term4 <- mean(r^2  * var_X_EC / r_R / ((1 - pi_A) + r / d_X_E / r_R)^2)
+        
+      }else{
+        
+        term1 <- kappa_1 / pi_A
+        term2 <- ((1 - pi_A) * var_X_RCT_0) / ((1 - pi_A) + r / d_X / r_R)^2
+        term3 <- (var_RCT_1 - kappa_1) + (var_RCT_0 - kappa_0) -
+          2 * gamma * sqrt( (var_RCT_1 - kappa_1) * (var_RCT_0 - kappa_0))
+        term4 <- r^2  * var_X_EC / r_R / ((1 - pi_A) + r / d_X / r_R)^2
+        
+      }
+      
+      nu2 <- (term1 + term2 + term3 + term4)
+      
+      sqrt_nu2 <- sqrt(nu2)
+      
+      res <- 1 - beta - pnorm(qnorm(alpha/2) + sqrt(N_RCT) * tau / sqrt_nu2) -
+        pnorm(qnorm(alpha/2) - sqrt(N_RCT) * tau / sqrt_nu2)
+      
+      return(res)
+    } 
+    
+    size_hybrid_sensi3 <- function(start = 1,
+                                 end = 500,
+                                 alpha = 0.05,
+                                 beta = 0.2,
+                                 pi_A = 0.5,
+                                 tau = 0.4,
+                                 delta_U = 0,     # no-op, see note in eval_hybrid_confound()
+                                 N_EC = 1000, # 1000 for sufficient case and 60 for insufficient case
+                                 var_X_EC = 1.09, 
+                                 var_EC = 1.59, # sufficient  = 1.5, insufficient = 1.585
+                                 r0_M = 1.39/1.59, # V(Y|R=1, A=0) / V(Y|R=0), 1.3/1.5 for sufficient and 1.3/1.585 for insufficient
+                                 r1_M = 1.39/1.59, # V(Y|R=1, A=1) / V(Y|R=0), 1.3/1.5 for sufficient and 1.3/1.585 for insufficient
+                                 r = 0.8165, # the ratio of variance in EC and variance in control of RCT
+                                 d_X = 1, # the ratio of f(X|R=1) with f(X|R=0), 1 for sufficient, NULL for insufficient
+                                 dist_para = list(mu_R = 1,
+                                                  sigma_R = 1,
+                                                  p_R = 0.5,
+                                                  mu_E = 1.2,
+                                                  sigma_E = sqrt(1.5),
+                                                  p_E = 0.7),
+                                 sample_size = 5*10^5,
+                                 gamma1 = 1, # the ratio of two kappa
+                                 gamma = 1 # correlation
+    ){
+      
+      size_length <- end - start + 1
+      Hybrid_size <- c()
+      
+      for(i in start:end){
+        
+        power_diff <- eval_hybrid_sensi3(N_RCT = i,
+                                       alpha = alpha,
+                                       beta = beta,
+                                       tau = tau,
+                                       pi_A = pi_A,
+                                       delta_U = delta_U,
+                                       N_EC = N_EC, 
+                                       var_X_EC = var_X_EC, 
+                                       var_EC = var_EC,
+                                       r0_M = r0_M, 
+                                       r1_M = r1_M,
+                                       r = r, 
+                                       d_X = d_X,
+                                       dist_para = dist_para,
+                                       sample_size = sample_size,
+                                       gamma1 = gamma1,
+                                       gamma = gamma)
+        Hybrid_size <- rbind(Hybrid_size, c(i, power_diff))
+        if(power_diff <= 0){break}
+        
+      }
+      
+      return(list(i,
+                  Hybrid_size))
+      
+    }
+    
   }
   
   ## Simulation section - sufficient EC (sample size 1000)
@@ -875,15 +1707,32 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
   hd_size_sensi2
   
   
+  ## Sensitivity section 3 - sufficient EC (sample size 1000)
+  hd_size_sensi3 <- data.frame(pi = pi_A_list,
+                               size = rep(NA, 5),
+                               ratio = rep(NA, 5))
+  for(i in 1:5){
+    hd_size_sensi3[i, 2] <-  size_hybrid_sensi3(start = 10,
+                                                end = 500,
+                                                alpha = 0.05,
+                                                beta = 0.2,
+                                                pi_A = pi_A_list[i],
+                                                tau = 0.4)[[1]]
+    hd_size_sensi3[i, 3] <- round((std_size_sensi3$size[i] - hd_size_sensi3[i, 2]) / std_size_sensi3$size[i], 4) 
+  }
+  hd_size_sensi3
+  
+  
+  
 }
 
-#########################################################################################
-####### 3.2 hybrid design - non-informative tuning parameter and estimated models #######
+###################################################################################
+####### 3.2 hybrid design - estimated tuning parameter and estimated models #######
 {
 
   ### Functions ###
   {
-    eval_hybrid_noninfo <- function(N_RCT,
+    eval_hybrid_est <- function(N_RCT,
                                     alpha, 
                                     beta,
                                     tau,
@@ -908,7 +1757,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       n <- N_RCT + N_EC
       r_R <- N_RCT / N_EC
       
-      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y|X, R=0, A=0)
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
       mu0_model <- lm(Y ~ X1 + X2, data_EC)
       var_X_EC <- mean((data_EC$Y - predict(mu0_model, data_EC))^2)
       var_EC <- (sd(data_EC$Y))^2
@@ -984,7 +1833,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
     }
     
     
-    size_hybrid_noninfo <- function(start = 1,
+    size_hybrid_est <- function(start = 1,
                                     end = 500,
                                     alpha = 0.05,
                                     beta = 0.2,
@@ -1011,7 +1860,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       
       for(i in start:end){
         
-        power_diff <- eval_hybrid_noninfo(N_RCT = i,
+        power_diff <- eval_hybrid_est(N_RCT = i,
                                           alpha = alpha,
                                           beta = beta,
                                           tau = tau,
@@ -1036,11 +1885,6 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
     }
     
   }
-
-  ### Use M = 2000 EC data to calculate the smallest sample size N_RCT 
-  # Since for difference EC data, the calculated sample size is different
-  # We generate 2000 EC data and calculate the average RCT sample size
-  M <- 2000 # replicates times
   
   ###### Simulation section - sufficient EC (sample size 1000) ######
   {
@@ -1053,7 +1897,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       data_EC <- f_gen_EC_suff(seed_EC = Index_all[i],
                                N_EC = 1000)
       for(j in 1:5){
-        N_RCT_res_non_suff[i, j] <- size_hybrid_noninfo(start = 1,
+        N_RCT_res_non_suff[i, j] <- size_hybrid_est(start = 1,
                                                 end = 500,
                                                 alpha = 0.05,
                                                 beta = 0.2,
@@ -1083,7 +1927,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       data_EC <- f_gen_EC_insuff(seed_EC = Index_all[i],
                                  N_EC = 60)
       for(j in 1:5){
-        N_RCT_res_non_60[i, j] <- size_hybrid_noninfo(start = 1,
+        N_RCT_res_non_60[i, j] <- size_hybrid_est(start = 1,
                                                 end = 500,
                                                 alpha = 0.05,
                                                 beta = 0.2,
@@ -1114,7 +1958,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       data_EC <- f_gen_EC_insuff(seed_EC = Index_all[i],
                                  N_EC = 30)
       for(j in 1:5){
-        N_RCT_res_non_30[i, j] <- size_hybrid_noninfo(start = 1,
+        N_RCT_res_non_30[i, j] <- size_hybrid_est(start = 1,
                                                   end = 500,
                                                   alpha = 0.05,
                                                   beta = 0.2,
@@ -1148,7 +1992,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       data_EC <- f_gen_EC_sensi2(seed_EC = Index_all[i],
                                  N_EC = 1000)
       for(j in 1:5){
-        N_RCT_res_non_sensi2[i,j] <- size_hybrid_noninfo(start = 1,
+        N_RCT_res_non_sensi2[i,j] <- size_hybrid_est(start = 1,
                                                       end = 500,
                                                       alpha = 0.05,
                                                       beta = 0.2,
@@ -1168,6 +2012,38 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
     
   }
   
+  ###### Sensitivity section 3 - violation of compatability (sample size 1000)  ######
+  {
+    
+    set.seed(567)
+    Index_all <- sample(1:50000000, M, replace=F)
+    N_RCT_res_non_sensi3 <- matrix(NA, nrow = M, ncol = 5) 
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_confound(seed_EC = Index_all[i],
+                                   N_EC = 1000,
+                                   delta_U = 0)
+      for(j in 1:5){
+        N_RCT_res_non_sensi3[i,j] <- size_hybrid_est(start = 1,
+                                                         end = 500,
+                                                         alpha = 0.05,
+                                                         beta = 0.2,
+                                                         tau = 0.4,
+                                                         pi_A = pi_A_list[j],
+                                                         data_EC = data_EC)[[1]]
+      }
+      
+    }
+    
+    # average N_RCT for M = 2000 EC data
+    hd_size_non_sensi3 <- data.frame(pi = pi_A_list,
+                                     size = ceiling(apply(N_RCT_res_non_sensi3, 2, mean)))
+    hd_size_non_sensi3
+    
+    # hd_size_non_sensi2$ratio <- (std_size$size - hd_size_non_sensi2$size) / std_size$size
+    
+  }
+  
 }
 
 ###########################################################################
@@ -1177,6 +2053,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
  
   ### Functions ###
   {
+    
     ## Functions for simulation section in the main paper and sensitivity analysis 1
     eval_sa_true <- function(N_RCT, 
                              alpha, 
@@ -1203,7 +2080,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       n <- N_RCT + N_EC
       r_R <- N_RCT / N_EC
       
-      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y|X, R=0, A=0)
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
       
       # Step 2: estimate V(Y|R=1, A=1), V(Y|R=1, A=0) 
       var_RCT_0 <- var_EC * r0_M
@@ -1404,7 +2281,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       n <- N_RCT + N_EC
       r_R <- N_RCT / N_EC
       
-      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y|X, R=0, A=0)
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
       
       # Step 2: estimate V(Y|R=1, A=1), V(Y|R=1, A=0) 
       var_RCT_0 <- var_EC * r0_M
@@ -1495,6 +2372,151 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       
     }
     
+    
+    ## Functions for sensitivity analysis 3
+    eval_sa_sensi3_true <- function(N_RCT, 
+                             alpha, 
+                             beta,
+                             tau,
+                             delta_U = 0,
+                             N_EC = 1000, # 1000 for sufficient case and 60 for insufficient case
+                             var_X_EC = 1.09, 
+                             var_EC = 1.59, # sufficient  = 1.5, insufficient = 1.585
+                             r0_M = 1.39/1.59, # V(Y|R=1, A=0) / V(Y|R=0), 1.3/1.5 for sufficient and 1.3/1.585 for insufficient
+                             r1_M = 1.39/1.59, # V(Y|R=1, A=1) / V(Y|R=0), 1.3/1.5 for sufficient and 1.3/1.585 for insufficient
+                             r = 0.8165, # the ratio of variance in EC and variance in control of RCT
+                             d_X = 1, # the ratio of f(X|R=1) with f(X|R=0)
+                             dist_para = list(mu_R = 1,
+                                              sigma_R = 1,
+                                              p_R = 0.5,
+                                              mu_E = 1.2,
+                                              sigma_E = sqrt(1.5),
+                                              p_E = 0.7),
+                             sample_size =  5*10^5,
+                             gamma1 = 1, # the ratio of two kappa
+                             gamma = 1 # correlation
+    ){
+      
+      n <- N_RCT + N_EC
+      r_R <- N_RCT / N_EC
+      
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
+      
+      # Step 2: estimate V(Y|R=1, A=1), V(Y|R=1, A=0) 
+      var_RCT_0 <- var_EC * r0_M
+      var_RCT_1 <- var_EC * r1_M
+      
+      # Step 3: estimate V(Y|X, R=1, A=0) using r(X)
+      var_X_RCT_0 <- r * var_X_EC  
+      
+      # Step 4: estimate kappa 0 and kappa 1
+      kappa_0 <- mean(var_X_RCT_0)
+      kappa_1 <- gamma1 * kappa_0
+      
+      # Step 5 - 7: d(X), gamma, variance
+      if(length(d_X) < 1){
+        
+        pmf_bern <- function(x2, p){
+          return(x2 * p + (1 - x2) * (1 - p))
+        }
+        
+        d_X_true <- function(x1, x2, 
+                             mu_R, sigma_R,
+                             p_R,
+                             mu_E, sigma_E,
+                             p_E
+        ){
+          
+          res <- dnorm(x1, mean = mu_R, sd = sigma_R) * pmf_bern(x2, p_R) / dnorm(x1, mean = mu_E, sd = sigma_E) / pmf_bern(x2, p_E) 
+          return(res)
+          
+        }
+        
+        dX_x1_E <- rnorm(sample_size, mean = dist_para$mu_E, sd = dist_para$sigma_E)
+        dX_x2_E <- rbinom(sample_size, size = 1, prob = dist_para$p_E)
+        d_X_E <-  d_X_true(x1 = dX_x1_E,
+                           x2 = dX_x2_E, 
+                           dist_para$mu_R, dist_para$sigma_R, dist_para$p_R,
+                           dist_para$mu_E, dist_para$sigma_E, dist_para$p_E)
+        
+        term1 <- kappa_1
+        term3 <- (var_RCT_1 - kappa_1) + (var_RCT_0 - kappa_0) - 
+          2 * gamma * sqrt( (var_RCT_1 - kappa_1) * (var_RCT_0 - kappa_0))
+        term4 <- mean((d_X_E * r_R)^2 / r_R  * var_X_EC)
+        
+      }else{
+        term1 <- kappa_1
+        term3 <- (var_RCT_1 - kappa_1) + (var_RCT_0 - kappa_0) - 
+          2 * gamma * sqrt( (var_RCT_1 - kappa_1) * (var_RCT_0 - kappa_0) )
+        term4 <- (d_X * r_R)^2 / r_R  * var_X_EC 
+        
+      }
+      
+      nu2 <- (term1 + term3 + term4)
+      
+      sqrt_nu2 <- sqrt(nu2)
+      
+      res <- 1 - beta - pnorm(qnorm(alpha/2) + sqrt(N_RCT) * tau / sqrt_nu2) -
+        pnorm(qnorm(alpha/2) - sqrt(N_RCT) * tau / sqrt_nu2)
+      
+      return(res)
+    }
+    
+    size_sa_sensi3_true <- function(start = 1,
+                             end = 500,
+                             alpha = 0.05,
+                             beta = 0.2,
+                             tau = 0.4,
+                             delta_U = 0,
+                             N_EC = 1000, # 1000 for sufficient case and 60 for insufficient case
+                             var_X_EC = 1.09, 
+                             var_EC = 1.59, # sufficient  = 1.5, insufficient = 1.585
+                             r0_M = 1.39/1.59, # V(Y|R=1, A=0) / V(Y|R=0), 1.3/1.5 for sufficient and 1.3/1.585 for insufficient
+                             r1_M = 1.39/1.59, # V(Y|R=1, A=1) / V(Y|R=0), 1.3/1.5 for sufficient and 1.3/1.585 for insufficient
+                             r = 0.8165, # the ratio of variance in EC and variance in control of RCT
+                             d_X = 1, # the ratio of f(X|R=1) with f(X|R=0)
+                             dist_para = list(mu_R = 1,
+                                              sigma_R = 1,
+                                              p_R = 0.5,
+                                              mu_E = 1.2,
+                                              sigma_E = sqrt(1.5),
+                                              p_E = 0.7),
+                             sample_size =  5*10^5,
+                             gamma1 = 1, # the ratio of two kappa
+                             gamma = 1 # correlation
+    ){
+      
+      size_length <- end - start + 1
+      SA_size <- c()
+      
+      for(i in start:end){
+        
+        power_diff <- eval_sa_sensi3_true(N_RCT = i,
+                                   alpha = alpha,
+                                   beta = beta,
+                                   tau = tau,
+                                   delta_U = delta_U,
+                                   N_EC = N_EC,
+                                   var_X_EC = var_X_EC, 
+                                   var_EC = var_EC, 
+                                   r0_M = r0_M, 
+                                   r1_M = r1_M, 
+                                   r = r,
+                                   d_X = d_X,
+                                   dist_para = dist_para,
+                                   sample_size = sample_size,
+                                   gamma1 = gamma1, 
+                                   gamma = gamma)
+        
+        SA_size <- rbind(SA_size, c(i, power_diff))
+        if(power_diff <= 0){break}
+      }
+      
+      return(list(i,
+                  SA_size))
+      
+    }
+    
   }
   
   ###### Simulation section - sufficient EC (sample size 1000) ######
@@ -1550,15 +2572,26 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
   sa_size_sensi2
   sa_ratio_sensi2
   
+  ###### Sensitivity section 2 - sufficient EC (sample size 1000) ######
+  sa_size_sensi3 <- size_sa_sensi3_true(start = 1,
+                                        end = 500,
+                                        alpha = 0.05,
+                                        beta = 0.2,
+                                        tau = 0.4)[[1]]
+  sa_ratio_sensi3 <- round((std_size_sensi3$size - sa_size_sensi3) / std_size_sensi3$size, 4)
+  sa_size_sensi3
+  sa_ratio_sensi3
+  
 }
 
-###########################################################################################
-####### 4.2 Single arm case - non-informative tuning parameter and estimated models #######
+#####################################################################################
+####### 4.2 Single arm case - estimated tuning parameter and estimated models #######
 ####### only for sufficient EC case #######
 {
+  
   ### Functions ###
   {
-    eval_sa_noninfo <- function(N_RCT, 
+    eval_sa_est <- function(N_RCT, 
                                 alpha, 
                                 beta,
                                 tau,
@@ -1582,7 +2615,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       n <- N_RCT + N_EC
       r_R <- N_RCT / N_EC
       
-      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y|X, R=0, A=0)
+      # Step 1: Estimate V(Y|X, R=0, A=0) and V(Y| R=0, A=0)
       mu0_model <- lm(Y ~ X1 + X2, data_EC)
       var_X_EC <- mean((data_EC$Y - predict(mu0_model, data_EC))^2)
       var_EC <- (sd(data_EC$Y))^2
@@ -1647,7 +2680,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       return(res)
     }
     
-    size_sa_noninfo <- function(start = 1,
+    size_sa_est <- function(start = 1,
                                 end = 500,
                                 alpha = 0.05,
                                 beta = 0.2,
@@ -1673,7 +2706,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       
       for(i in start:end){
         
-        power_diff <- eval_sa_noninfo(N_RCT = i,
+        power_diff <- eval_sa_est(N_RCT = i,
                                       alpha = alpha,
                                       beta = beta,
                                       tau = tau,
@@ -1697,7 +2730,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
     }
     
     # Function for verifying the sufficient feasibility condition (under default setting)
-    eval_sa_verify_noninfo <- function(alpha = 0.05, 
+    eval_sa_verify_est <- function(alpha = 0.05, 
                                        beta = 0.2,
                                        tau = tau_use,
                                        N_EC = 60, 
@@ -1756,11 +2789,6 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
     
   }
   
-  ### Use M = 2000 EC data to calculate the smallest sample size N_RCT 
-  # Since for difference EC data, the calculated sample size is different
-  # We generate 2000 EC data and calculate the average RCT sample size
-  M <- 2000
-  
   ###### Simulation section - sufficient EC (sample size 1000) ######
   {
    
@@ -1771,7 +2799,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       print(i)
       data_EC <- f_gen_EC_suff(seed_EC = Index_all[i],
                                N_EC = 1000)
-      sa_res_suff[i] <- size_sa_noninfo(start = 1,
+      sa_res_suff[i] <- size_sa_est(start = 1,
                                         end = 500,
                                         alpha = 0.05,
                                         beta = 0.2,
@@ -1796,7 +2824,7 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
       print(i)
       data_EC <- f_gen_EC_sensi2(seed_EC = Index_all[i],
                                  N_EC = 1000)
-      sa_res_sensi2[i] <- size_sa_noninfo(start = 1,
+      sa_res_sensi2[i] <- size_sa_est(start = 1,
                                       end = 500,
                                       alpha = 0.05,
                                       beta = 0.2,
@@ -1805,6 +2833,29 @@ pi_A_list <- c(0.5, 0.6, 0.7, 0.8, 0.9)
     }
     
     mean(sa_res_sensi2) |> ceiling()
+    
+  }
+  
+  ###### Sensitivity section 3 - violation of compatability (sample size 1000) ######
+  {
+    
+    set.seed(567)
+    Index_all <- sample(1:50000000, M, replace=F)
+    sa_res_sensi3 <- rep(NA, M)
+    for(i in 1:M){
+      print(i)
+      data_EC <- f_gen_EC_confound(seed_EC = Index_all[i],
+                                   N_EC = 1000,
+                                   delta_U = 0)
+      sa_res_sensi3[i] <- size_sa_est(start = 1,
+                                          end = 500,
+                                          alpha = 0.05,
+                                          beta = 0.2,
+                                          tau = 0.4,
+                                          data_EC = data_EC)[[1]]
+    }
+    
+    mean(sa_res_sensi3) |> ceiling()
     
   }
   

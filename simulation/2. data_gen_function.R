@@ -280,3 +280,149 @@
   }
 }
 
+
+## Additional data generation functions for sensitivity analysis 3
+{
+  
+  f_gen_RCT_confound_Y <- function(x1, x2, u, 
+                                   A,
+                                   tau,
+                                   beta0_R, beta1_R, beta2_R,
+                                   betaU,
+                                   sdY_R){
+    mu <- beta0_R + tau * A + beta1_R * x1 + beta2_R * x2 + betaU * u
+    return(rnorm(1, mean = mu, sd = sdY_R))
+  }
+  
+  f_gen_RCT_confound <- function(seed_RCT = 123,
+                                 N_RCT,
+                                 pi_A = 0.5,
+                                 tau = 0.4,
+                                 muX1_R = 1, sdX1_R = 1, pX2_R = 0.5,
+                                 beta0_R = 1, beta1_R = 0.5, beta2_R = -1,
+                                 betaU = 0.3,
+                                 sdY_R = sqrt(0.8)){
+    set.seed(seed_RCT)
+    X1 <- rnorm(N_RCT, mean = muX1_R, sd = sdX1_R)
+    X2 <- rbinom(N_RCT, size = 1, prob = pX2_R)
+    U  <- rnorm(N_RCT, mean = 0, sd = 1)          # U ~ N(0,1) in the current study, always
+    A  <- rbinom(N_RCT, size = 1, prob = pi_A)
+    Y  <- mapply(f_gen_RCT_confound_Y,
+                 x1 = X1, x2 = X2, u = U, A = A,
+                 MoreArgs = list(tau = tau, beta0_R = beta0_R, beta1_R = beta1_R,
+                                 beta2_R = beta2_R, betaU = betaU, sdY_R = sdY_R))
+    # NOTE: U is returned for oracle/diagnostic use only -- drop it before estimation,
+    # since the analyst does not observe U.
+    # return(data.frame(A = A, X1 = X1, X2 = X2, U = U, Y = Y))
+    return(data.frame(A = A, X1 = X1, X2 = X2, Y = Y))
+  }
+  
+  f_gen_EC_confound_Y <- function(x1, x2, u, 
+                                  beta0_EC, beta1_EC, beta2_EC,
+                                  betaU,
+                                  sdY_EC){
+    mu <- beta0_EC + beta1_EC * x1 + beta2_EC * x2 + betaU * u
+    return(rnorm(1, mean = mu, sd = sdY_EC))
+  }
+  
+  f_gen_EC_confound <- function(seed_EC = 123,
+                                N_EC = 1000,
+                                muX1_EC = 1, sdX1_EC = 1, pX2_EC = 0.5,  
+                                beta0_EC = 1, beta1_EC = 0.5, beta2_EC = -1,
+                                betaU = 0.3,
+                                sdY_EC = 1,
+                                delta_U = 0 # this need to adjust 0, 0.5, 1
+  ){ 
+    set.seed(seed_EC)
+    X1 <- rnorm(N_EC, mean = muX1_EC, sd = sdX1_EC)
+    X2 <- rbinom(N_EC, size = 1, prob = pX2_EC)
+    U  <- rnorm(N_EC, mean = delta_U, sd = 1)     # U ~ N(delta_U, 1) in the EC population
+    Y  <- mapply(f_gen_EC_confound_Y,
+                 x1 = X1, x2 = X2, u = U,
+                 beta0_EC = beta0_EC, beta1_EC = beta1_EC,
+                 beta2_EC = beta2_EC, betaU = betaU, sdY_EC = sdY_EC)
+    # return(data.frame(A = 0, X1 = X1, X2 = X2, U = U, Y = Y))
+    return(data.frame(A = 0, X1 = X1, X2 = X2, Y = Y))
+  }
+  
+}
+
+
+## Additional data generation functions for sensitivity analysis 5
+{
+  
+  ### Appendix B.4.3 - Misspecification of the design-stage outcome model ###
+  
+  # EC outcome model: nonlinear in X1 (0.4*X1^2 term added to the linear mean)
+  f_gen_EC_Y_sensi5 <- function(x1,
+                                x2,
+                                beta0_EC,
+                                beta1_EC,
+                                beta2_EC, 
+                                sdY_EC){
+    mu <- beta0_EC + beta1_EC * x1 + beta2_EC * x2 + 0.4 * x1^2
+    return(rnorm(1, mean = mu, sd = sdY_EC))
+  }
+  
+  f_gen_EC_sensi5 <- function(seed_EC = 123,
+                              N_EC = 1000,
+                              muX1_EC = 1, 
+                              sdX1_EC = 1,
+                              pX2_EC = 0.5,
+                              beta0_EC = 1,
+                              beta1_EC = 0.5,
+                              beta2_EC = -1,
+                              sdY_EC = 1){
+    
+    set.seed(seed_EC)
+    
+    # generate the pre-treatment covariates
+    X1_EC <- rnorm(N_EC, mean = muX1_EC, sd = sdX1_EC)
+    X2_EC <- rbinom(N_EC, size = 1, prob = pX2_EC)
+    
+    Y_EC <- mapply(f_gen_EC_Y_sensi5,
+                   x1 = X1_EC,
+                   x2 = X2_EC, 
+                   beta0_EC,
+                   beta1_EC,
+                   beta2_EC, 
+                   sdY_EC)
+    
+    return(data.frame(A = rep(0, N_EC), X1 = X1_EC, X2 = X2_EC, Y = Y_EC))
+    
+  }
+  
+  
+  # RCT outcome model: same nonlinear term in X1, so Assumption 3(i) (compatibility) still holds
+  f_gen_RCT_Y_sensi5 <- function(x1, x2, A,
+                                 tau,
+                                 beta0_R, beta1_R, beta2_R,
+                                 sdY_R){
+    mu <- beta0_R + tau * A + beta1_R * x1 + beta2_R * x2 + 0.4 * x1^2
+    return(rnorm(1, mean = mu, sd = sdY_R))
+  }
+  
+  f_gen_RCT_sensi5 <- function(seed_RCT = 123,
+                               N_RCT,
+                               pi_A = 0.5,
+                               tau = 0.4,
+                               muX1_R = 1, sdX1_R = 1, pX2_R = 0.5,
+                               beta0_R = 1, beta1_R = 0.5, beta2_R = -1,
+                               sdY_R = sqrt(0.8)){
+    
+    set.seed(seed_RCT)
+    
+    X1 <- rnorm(N_RCT, mean = muX1_R, sd = sdX1_R)
+    X2 <- rbinom(N_RCT, size = 1, prob = pX2_R)
+    A  <- rbinom(N_RCT, size = 1, prob = pi_A)
+    
+    Y  <- mapply(f_gen_RCT_Y_sensi5,
+                 x1 = X1, x2 = X2, A = A,
+                 MoreArgs = list(tau = tau, beta0_R = beta0_R, beta1_R = beta1_R,
+                                 beta2_R = beta2_R, sdY_R = sdY_R))
+    
+    return(data.frame(A = A, X1 = X1, X2 = X2, Y = Y))
+    
+  }
+  
+}
